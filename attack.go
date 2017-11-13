@@ -35,6 +35,7 @@ func attackCmd() command {
 	fs.DurationVar(&opts.duration, "duration", 0, "Duration of the test [0 = forever]")
 	fs.DurationVar(&opts.timeout, "timeout", vegeta.DefaultTimeout, "Requests timeout")
 	fs.Uint64Var(&opts.rate, "rate", 50, "Requests per second")
+	fs.BoolVar(&opts.saturate, "saturate", false, "Submit requests as soon as the last one completes")
 	fs.Uint64Var(&opts.workers, "workers", vegeta.DefaultWorkers, "Initial number of workers")
 	fs.IntVar(&opts.connections, "connections", vegeta.DefaultConnections, "Max open idle connections per target host")
 	fs.IntVar(&opts.redirects, "redirects", vegeta.DefaultRedirects, "Number of redirects to follow. -1 will not follow but marks as success")
@@ -49,7 +50,7 @@ func attackCmd() command {
 }
 
 var (
-	errZeroRate = errors.New("rate must be bigger than zero")
+	errZeroRate = errors.New("rate must be greater than zero, or specify saturate")
 	errBadCert  = errors.New("bad certificate")
 )
 
@@ -67,6 +68,7 @@ type attackOpts struct {
 	duration    time.Duration
 	timeout     time.Duration
 	rate        uint64
+	saturate    bool
 	workers     uint64
 	connections int
 	redirects   int
@@ -78,7 +80,7 @@ type attackOpts struct {
 // attack validates the attack arguments, sets up the
 // required resources, launches the attack and writes the results
 func attack(opts *attackOpts) (err error) {
-	if opts.rate == 0 {
+	if opts.rate == 0 && opts.saturate == false {
 		return errZeroRate
 	}
 
@@ -135,7 +137,7 @@ func attack(opts *attackOpts) (err error) {
 		vegeta.HTTP2(opts.http2),
 	)
 
-	res := atk.Attack(tr, opts.rate, opts.duration)
+	res := atk.Attack(tr, opts.rate, opts.saturate, opts.duration)
 	enc := vegeta.NewEncoder(out)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)

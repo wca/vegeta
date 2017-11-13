@@ -165,9 +165,30 @@ func HTTP2(enabled bool) func(*Attacker) {
 // the rate specified for duration time. When the duration is zero the attack
 // runs until Stop is called. Results are put into the returned channel as soon
 // as they arrive.
-func (a *Attacker) Attack(tr Targeter, rate uint64, du time.Duration) <-chan *Result {
+func (a *Attacker) Attack(tr Targeter, rate uint64, saturate bool, du time.Duration) <-chan *Result {
 	var workers sync.WaitGroup
+
 	results := make(chan *Result)
+
+	// Saturation works similarly to specifying a rate, but instead new
+	// requests are spawned as soon as the previous completes.  The
+	// final rate is thus a function of the duration, number of workers,
+	// and average completion latency.
+	if saturate == true {
+		go func() {
+			defer func() {
+				workers.Wait()
+				close(results)
+			}()
+			endTime := time.Now().Add(du)
+			for i := uint64(0); i < a.workers; i++ {
+				workers.Add(1)
+				go a.saturateAttack(tr, &workers, endTime, results)
+			}
+		}()
+		return results;
+	}
+
 	ticks := make(chan time.Time)
 	for i := uint64(0); i < a.workers; i++ {
 		workers.Add(1)
@@ -208,6 +229,17 @@ func (a *Attacker) Stop() {
 		return
 	default:
 		close(a.stopch)
+	}
+}
+
+func (a *Attacker) saturateAttack(tr Targeter, workers *sync.WaitGroup, endTime time.Time, results chan<- *Result) {
+	defer workers.Done()
+	for {
+		startTime := time.Now()
+		if startTime.After(endTime) {
+			break;
+		}
+		results <- a.hit(tr, startTime)
 	}
 }
 
